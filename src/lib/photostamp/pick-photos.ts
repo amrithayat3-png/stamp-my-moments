@@ -41,7 +41,7 @@ function pickWithInput(): Promise<BatchPhoto[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/*";
+    input.accept = "image/*,.heic,.heif";
     input.multiple = true;
     input.style.display = "none";
     input.addEventListener("change", async () => {
