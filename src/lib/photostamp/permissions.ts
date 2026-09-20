@@ -23,7 +23,7 @@ export function isNativeShell(): boolean {
 }
 
 export async function checkGalleryPermission(): Promise<PermissionState> {
-  const camera = bridge()?.Plugins?.Camera;
+  const camera = bridge()?.Plugins?.['Camera'];
   if (!camera?.checkPermissions) return "unsupported";
   try {
     const result = await camera.checkPermissions();
@@ -34,7 +34,7 @@ export async function checkGalleryPermission(): Promise<PermissionState> {
 }
 
 export async function requestGalleryPermission(): Promise<PermissionState> {
-  const camera = bridge()?.Plugins?.Camera;
+  const camera = bridge()?.Plugins?.['Camera'];
   if (!camera?.requestPermissions) return "unsupported";
   try {
     const result = await camera.requestPermissions({ permissions: ["photos"] });
