@@ -6,6 +6,21 @@ export interface DecodedImage {
   height: number;
 }
 
+function looksHeic(blob: Blob | null, url: string) {
+  const type = blob?.type ?? "";
+  return /hei[cf]/i.test(type) || /\.hei[cf](\?|$)/i.test(url);
+}
+
+/** iPhone/Android HEIC photos: browsers can't decode them, so convert first. */
+async function heicToBitmapSource(blob: Blob): Promise<Blob | null> {
+  try {
+    const { heicTo } = await import("heic-to");
+    return await heicTo({ blob, type: "image/jpeg", quality: 0.95 });
+  } catch {
+    return null;
+  }
+}
+
 async function sourceBlob(photo: Pick<BatchPhoto, "url" | "file">): Promise<Blob | null> {
   if (photo.file) return photo.file;
   try {
@@ -102,7 +117,13 @@ export async function decodeToCanvas(
   photo: Pick<BatchPhoto, "url" | "file">,
   maxEdge: number,
 ): Promise<DecodedImage> {
-  const blob = await sourceBlob(photo);
+  let blob = await sourceBlob(photo);
+  let objectUrl: string | null = null;
+
+  if (blob && looksHeic(blob, photo.url)) {
+    const converted = await heicToBitmapSource(blob);
+    if (converted) blob = converted;
+  }
 
   if (blob && typeof createImageBitmap === "function") {
     try {
