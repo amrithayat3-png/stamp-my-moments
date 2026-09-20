@@ -16,6 +16,12 @@ import type { CapacitorConfig } from "@capacitor/cli";
  *   <!-- Writing stamped copies back to the gallery on Android 9 and below -->
  *   <uses-permission android:name="android.permission.WRITE_EXTERNAL_STORAGE"
  *                    android:maxSdkVersion="28" />
+ *
+ * Native plugins used when the shell is generated (web build works without them):
+ *   @capacitor/camera            — multi-select gallery picker
+ *   @capacitor-community/media   — MediaStore save into the Pictures/PhotoStamp album
+ *   @capacitor/filesystem        — scoped-storage fallback write + share staging
+ *   @capacitor/share             — native share sheet
  */
 const config: CapacitorConfig = {
   appId: "app.lovable.photostamp",

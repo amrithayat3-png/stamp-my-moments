@@ -117,7 +117,7 @@ function CustomizeScreen() {
               onClick={() => navigate({ to: "/success" })}
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-primary px-5 py-4 text-sm font-semibold text-primary-foreground transition-transform active:scale-[0.98]"
             >
-              Continue
+              Stamp &amp; save {photos.length} photo{photos.length === 1 ? "" : "s"}
               <ArrowRight className="size-4" />
             </button>
           )}
