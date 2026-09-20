@@ -8,11 +8,12 @@ function nextId() {
   return `photo-${Date.now()}-${counter}`;
 }
 
-function base(name: string, url: string, size: number): BatchPhoto {
+function base(name: string, url: string, size: number, file?: Blob): BatchPhoto {
   return {
     id: nextId(),
     name: name || "photo.jpg",
     url,
+    file,
     size,
     captureDate: null,
     dateSource: "none",

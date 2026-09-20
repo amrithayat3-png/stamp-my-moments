@@ -126,6 +126,7 @@ function CustomizeScreen() {
     >
       <StampPreview
         url={photo.url}
+        file={photo.file}
         captureDate={photo.captureDate}
         settings={effective}
         onCanvasReady={onCanvasReady}
