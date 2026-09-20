@@ -5,6 +5,8 @@ export interface BatchPhoto {
   name: string;
   /** Blob/object URL used for thumbnails and previews. */
   url: string;
+  /** Original file data, kept so rendering never depends on refetching the URL. */
+  file?: Blob;
   size: number;
   /** Capture date from EXIF or manual entry, as an ISO-ish local string (yyyy-MM-ddTHH:mm). */
   captureDate: string | null;
