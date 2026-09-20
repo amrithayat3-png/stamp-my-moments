@@ -5,7 +5,7 @@ import type { StampSettings } from "@/lib/photostamp/types";
 
 interface Props {
   url: string;
-  file?: Blob;
+  file?: Blob | undefined;
   captureDate: string | null;
   settings: StampSettings;
   /** Receives the canvas after each render so callers can sample pixels. */
