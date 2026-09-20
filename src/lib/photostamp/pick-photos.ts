@@ -1,5 +1,6 @@
 import type { BatchPhoto } from "./types";
 import { isNativeShell, requestGalleryPermission } from "./permissions";
+import { readCaptureDate } from "./exif";
 
 let counter = 0;
 function nextId() {
@@ -7,15 +8,32 @@ function nextId() {
   return `photo-${Date.now()}-${counter}`;
 }
 
-function fromFile(file: File): BatchPhoto {
+function base(name: string, url: string, size: number): BatchPhoto {
   return {
     id: nextId(),
-    name: file.name || "photo.jpg",
-    url: URL.createObjectURL(file),
-    size: file.size,
+    name: name || "photo.jpg",
+    url,
+    size,
     captureDate: null,
+    dateSource: "none",
     status: "date-needed",
+    override: null,
   };
+}
+
+/**
+ * Reads the EXIF capture date for each photo. Photos without one keep
+ * captureDate = null so the user is asked explicitly — never a file timestamp.
+ */
+async function withCaptureDates(photos: BatchPhoto[], blobs: (Blob | string)[]) {
+  return Promise.all(
+    photos.map(async (photo, i) => {
+      const captureDate = await readCaptureDate(blobs[i]!);
+      return captureDate
+        ? { ...photo, captureDate, dateSource: "exif" as const, status: "ready" as const }
+        : photo;
+    }),
+  );
 }
 
 function pickWithInput(): Promise<BatchPhoto[]> {
@@ -25,10 +43,11 @@ function pickWithInput(): Promise<BatchPhoto[]> {
     input.accept = "image/*";
     input.multiple = true;
     input.style.display = "none";
-    input.addEventListener("change", () => {
+    input.addEventListener("change", async () => {
       const files = Array.from(input.files ?? []);
       input.remove();
-      resolve(files.map(fromFile));
+      const photos = files.map((f) => base(f.name, URL.createObjectURL(f), f.size));
+      resolve(await withCaptureDates(photos, files));
     });
     input.addEventListener("cancel", () => {
       input.remove();
@@ -40,22 +59,27 @@ function pickWithInput(): Promise<BatchPhoto[]> {
 }
 
 async function pickWithCapacitor(): Promise<BatchPhoto[]> {
-  const gallery = (window as any).Capacitor?.Plugins?.Camera;
+  const gallery = (window as any).Capacitor?.Plugins?.['Camera'];
   const result = await gallery.pickImages({ quality: 90 });
-  const photos: BatchPhoto[] = (result?.photos ?? []).map((p: any) => ({
-    id: nextId(),
-    name: (p.path ?? p.webPath ?? "photo.jpg").split("/").pop() || "photo.jpg",
-    url: p.webPath ?? p.path,
-    size: 0,
-    captureDate: null,
-    status: "date-needed" as const,
-  }));
-  return photos;
+  const raw: any[] = result?.photos ?? [];
+  const photos = raw.map((p) =>
+    base((p.path ?? p.webPath ?? "photo.jpg").split("/").pop() || "photo.jpg", p.webPath ?? p.path, 0),
+  );
+  const blobs = await Promise.all(
+    photos.map(async (p) => {
+      try {
+        return await (await fetch(p.url)).blob();
+      } catch {
+        return p.url;
+      }
+    }),
+  );
+  return withCaptureDates(photos, blobs);
 }
 
 /** Opens the gallery and returns the chosen photos (empty array when cancelled). */
 export async function pickPhotos(): Promise<BatchPhoto[]> {
-  if (isNativeShell() && (window as any).Capacitor?.Plugins?.Camera?.pickImages) {
+  if (isNativeShell() && (window as any).Capacitor?.Plugins?.['Camera']?.pickImages) {
     const state = await requestGalleryPermission();
     if (state === "denied") return [];
     try {
