@@ -109,7 +109,7 @@ function CustomizeScreen() {
               className="flex w-full items-center justify-center gap-2 rounded-2xl bg-warning px-5 py-4 text-sm font-semibold text-warning-foreground transition-transform active:scale-[0.98]"
             >
               <AlertTriangle className="size-4" />
-              {missingDateCount} photo{missingDateCount === 1 ? "" : "s"} need a date — fix now
+              {missingDateCount} photo{missingDateCount === 1 ? " needs" : "s need"} a date — fix now
             </button>
           ) : (
             <button
