@@ -122,7 +122,10 @@ export async function decodeToCanvas(
 
   if (blob && looksHeic(blob, photo.url)) {
     const converted = await heicToBitmapSource(blob);
-    if (converted) blob = converted;
+    if (converted) {
+      blob = converted;
+      objectUrl = URL.createObjectURL(converted);
+    }
   }
 
   if (blob && typeof createImageBitmap === "function") {
