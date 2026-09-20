@@ -2,6 +2,7 @@ import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useState } from "react";
 import { ArrowRight, CalendarClock, CheckCircle2, ImagePlus, Trash2, X } from "lucide-react";
 import { AppShell } from "@/components/photostamp/app-shell";
+import { DateEntryDialog } from "@/components/photostamp/date-entry-dialog";
 import { useBatch } from "@/lib/photostamp/batch-store";
 import { pickPhotos } from "@/lib/photostamp/pick-photos";
 
@@ -11,7 +12,8 @@ export const Route = createFileRoute("/batch")({
       { title: "Your batch — PhotoStamp" },
       {
         name: "description",
-        content: "Review the photos in your batch, remove any you don't need, and add more before stamping.",
+        content:
+          "Review the photos in your batch, fill in any missing capture dates, and add more before stamping.",
       },
       { property: "og:title", content: "Your batch — PhotoStamp" },
       {
@@ -25,8 +27,9 @@ export const Route = createFileRoute("/batch")({
 
 function BatchScreen() {
   const navigate = useNavigate();
-  const { photos, addPhotos, removePhoto, clearAll } = useBatch();
+  const { photos, addPhotos, removePhoto, clearAll, setCaptureDate, missingDateCount } = useBatch();
   const [busy, setBusy] = useState(false);
+  const [dateDialogFor, setDateDialogFor] = useState<string | null>(null);
 
   async function addMore() {
     setBusy(true);
@@ -72,7 +75,11 @@ function BatchScreen() {
             <p className="text-sm font-semibold">
               {photos.length} photo{photos.length === 1 ? "" : "s"}
             </p>
-            <p className="truncate text-xs text-muted-foreground">Dates are read in the next step</p>
+            <p className="truncate text-xs text-muted-foreground">
+              {missingDateCount > 0
+                ? `${missingDateCount} still need${missingDateCount === 1 ? "s" : ""} a date`
+                : "All dates found"}
+            </p>
           </div>
           <button
             type="button"
@@ -107,7 +114,7 @@ function BatchScreen() {
 
       <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
         {photos.map((photo) => {
-          const ready = photo.status === "ready";
+          const ready = Boolean(photo.captureDate);
           return (
             <div
               key={photo.id}
@@ -127,25 +134,37 @@ function BatchScreen() {
                 <X className="size-4" />
               </button>
               <div className="absolute inset-x-2 bottom-2">
-                <span
-                  className={`inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-medium backdrop-blur ${
-                    ready
-                      ? "bg-success/20 text-success"
-                      : "bg-warning/20 text-warning"
-                  }`}
-                >
-                  {ready ? (
+                {ready ? (
+                  <span className="inline-flex items-center gap-1.5 rounded-full bg-success/20 px-2.5 py-1 text-[11px] font-medium text-success backdrop-blur">
                     <CheckCircle2 className="size-3" />
-                  ) : (
+                    Ready
+                  </span>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setDateDialogFor(photo.id)}
+                    className="inline-flex items-center gap-1.5 rounded-full bg-warning px-2.5 py-1 text-[11px] font-semibold text-warning-foreground"
+                  >
                     <CalendarClock className="size-3" />
-                  )}
-                  {ready ? "Ready" : "Date needed"}
-                </span>
+                    Needs date
+                  </button>
+                )}
               </div>
             </div>
           );
         })}
       </div>
+
+      <DateEntryDialog
+        open={dateDialogFor !== null}
+        photoName={photos.find((p) => p.id === dateDialogFor)?.name ?? ""}
+        initialValue={photos.find((p) => p.id === dateDialogFor)?.captureDate ?? null}
+        onClose={() => setDateDialogFor(null)}
+        onSave={(value) => {
+          if (dateDialogFor) setCaptureDate(dateDialogFor, value);
+          setDateDialogFor(null);
+        }}
+      />
     </AppShell>
   );
 }
