@@ -143,20 +143,24 @@ export async function decodeToCanvas(
     }
   }
 
-  const orientation = blob ? await readOrientation(blob) : 1;
-  const img = await decodeElement(photo.url);
-  const natural = orientedSize(img.naturalWidth, img.naturalHeight, orientation);
-  if (!natural.width || !natural.height) {
-    throw new Error("This photo could not be decoded");
+  try {
+    const orientation = blob ? await readOrientation(blob) : 1;
+    const img = await decodeElement(objectUrl ?? photo.url);
+    const natural = orientedSize(img.naturalWidth, img.naturalHeight, orientation);
+    if (!natural.width || !natural.height) {
+      throw new Error("This photo could not be decoded");
+    }
+    const scale = Math.min(1, maxEdge / Math.max(natural.width, natural.height));
+    const width = Math.max(1, Math.round(natural.width * scale));
+    const height = Math.max(1, Math.round(natural.height * scale));
+    const { canvas, ctx } = makeCanvas(width, height);
+    applyOrientation(ctx, orientation, width, height);
+    const drawW = orientation >= 5 ? height : width;
+    const drawH = orientation >= 5 ? width : height;
+    ctx.drawImage(img, 0, 0, drawW, drawH);
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
+    return { canvas, width, height };
+  } finally {
+    if (objectUrl) URL.revokeObjectURL(objectUrl);
   }
-  const scale = Math.min(1, maxEdge / Math.max(natural.width, natural.height));
-  const width = Math.max(1, Math.round(natural.width * scale));
-  const height = Math.max(1, Math.round(natural.height * scale));
-  const { canvas, ctx } = makeCanvas(width, height);
-  applyOrientation(ctx, orientation, width, height);
-  const drawW = orientation >= 5 ? height : width;
-  const drawH = orientation >= 5 ? width : height;
-  ctx.drawImage(img, 0, 0, drawW, drawH);
-  ctx.setTransform(1, 0, 0, 1, 0, 0);
-  return { canvas, width, height };
 }
