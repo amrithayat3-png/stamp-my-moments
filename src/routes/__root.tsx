@@ -11,6 +11,8 @@ import { useEffect, type ReactNode } from "react";
 
 import appCss from "../styles.css?url";
 import { reportLovableError } from "../lib/lovable-error-reporting";
+import { ThemeProvider } from "../lib/photostamp/theme";
+import { BatchProvider } from "../lib/photostamp/batch-store";
 
 function NotFoundComponent() {
   return (
