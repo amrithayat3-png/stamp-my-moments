@@ -1,15 +1,6 @@
+import { decodeToCanvas } from "./load-image";
 import { drawStamp, stampTextFor } from "./render-stamp";
 import type { BatchPhoto, StampSettings } from "./types";
-
-function loadImage(url: string): Promise<HTMLImageElement> {
-  return new Promise((resolve, reject) => {
-    const img = new Image();
-    img.crossOrigin = "anonymous";
-    img.onload = () => resolve(img);
-    img.onerror = () => reject(new Error("Could not decode this image"));
-    img.src = url;
-  });
-}
 
 export interface StampedFile {
   name: string;
@@ -21,35 +12,56 @@ function outputName(name: string) {
   return `${base}_stamped.jpg`;
 }
 
+function encode(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
+  return new Promise((resolve) => {
+    try {
+      canvas.toBlob((b) => resolve(b), "image/jpeg", quality);
+    } catch {
+      resolve(null);
+    }
+  });
+}
+
+// Progressively smaller working sizes: phones with little free memory fail to
+// allocate the canvas or return a null blob at full camera resolution.
+const EDGE_STEPS = [4096, 3072, 2048, 1440];
+
 /**
- * Renders one photo at full resolution with its stamp burned in.
- * Originals are never touched — this always produces a new JPEG blob.
+ * Renders one photo with its stamp burned in and returns a new JPEG blob.
+ * Originals are never modified.
  */
 export async function renderStampedPhoto(
   photo: BatchPhoto,
   settings: StampSettings,
 ): Promise<StampedFile> {
-  const img = await loadImage(photo.url);
-  // Guard against OOM on very large photos while keeping print-quality output.
-  const maxEdge = 4096;
-  const scale = Math.min(1, maxEdge / Math.max(img.naturalWidth, img.naturalHeight));
-  const w = Math.max(1, Math.round(img.naturalWidth * scale));
-  const h = Math.max(1, Math.round(img.naturalHeight * scale));
+  let lastError: unknown = null;
 
-  const canvas = document.createElement("canvas");
-  canvas.width = w;
-  canvas.height = h;
-  const ctx = canvas.getContext("2d");
-  if (!ctx) throw new Error("Canvas is unavailable on this device");
-  ctx.drawImage(img, 0, 0, w, h);
-  drawStamp(ctx, w, h, stampTextFor(photo.captureDate, settings), settings);
+  for (const maxEdge of EDGE_STEPS) {
+    let canvas: HTMLCanvasElement | null = null;
+    try {
+      const decoded = await decodeToCanvas(photo, maxEdge);
+      canvas = decoded.canvas;
+      const ctx = canvas.getContext("2d");
+      if (!ctx) throw new Error("Canvas isn't available on this device");
+      drawStamp(
+        ctx,
+        decoded.width,
+        decoded.height,
+        stampTextFor(photo.captureDate, settings),
+        settings,
+      );
+      const blob = (await encode(canvas, 0.92)) ?? (await encode(canvas, 0.8));
+      if (!blob || blob.size === 0) throw new Error("Not enough memory to save this photo");
+      return { name: outputName(photo.name), blob };
+    } catch (error) {
+      lastError = error;
+    } finally {
+      if (canvas) {
+        canvas.width = 0;
+        canvas.height = 0;
+      }
+    }
+  }
 
-  const blob = await new Promise<Blob | null>((resolve) =>
-    canvas.toBlob((b) => resolve(b), "image/jpeg", 0.92),
-  );
-  // Free the backing store as soon as possible.
-  canvas.width = 0;
-  canvas.height = 0;
-  if (!blob) throw new Error("Could not encode the stamped photo");
-  return { name: outputName(photo.name), blob };
+  throw lastError instanceof Error ? lastError : new Error("This photo could not be stamped");
 }

@@ -8,11 +8,12 @@ function nextId() {
   return `photo-${Date.now()}-${counter}`;
 }
 
-function base(name: string, url: string, size: number): BatchPhoto {
+function base(name: string, url: string, size: number, file?: Blob): BatchPhoto {
   return {
     id: nextId(),
     name: name || "photo.jpg",
     url,
+    file,
     size,
     captureDate: null,
     dateSource: "none",
@@ -40,13 +41,13 @@ function pickWithInput(): Promise<BatchPhoto[]> {
   return new Promise((resolve) => {
     const input = document.createElement("input");
     input.type = "file";
-    input.accept = "image/*";
+    input.accept = "image/*,.heic,.heif";
     input.multiple = true;
     input.style.display = "none";
     input.addEventListener("change", async () => {
       const files = Array.from(input.files ?? []);
       input.remove();
-      const photos = files.map((f) => base(f.name, URL.createObjectURL(f), f.size));
+      const photos = files.map((f) => base(f.name, URL.createObjectURL(f), f.size, f));
       resolve(await withCaptureDates(photos, files));
     });
     input.addEventListener("cancel", () => {
@@ -68,7 +69,10 @@ async function pickWithCapacitor(): Promise<BatchPhoto[]> {
   const blobs = await Promise.all(
     photos.map(async (p) => {
       try {
-        return await (await fetch(p.url)).blob();
+        const blob = await (await fetch(p.url)).blob();
+        // Keep the bytes so rendering never depends on refetching the URL.
+        p.file = blob;
+        return blob;
       } catch {
         return p.url;
       }
