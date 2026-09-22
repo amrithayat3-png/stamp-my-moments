@@ -29,6 +29,9 @@ const config: CapacitorConfig = {
   webDir: "dist",
   android: {
     allowMixedContent: false,
+    // Lets you inspect the WebView from chrome://inspect if the APK ever
+    // misbehaves; it does not change the user-facing app.
+    webContentsDebuggingEnabled: true,
   },
   plugins: {
     CapacitorHttp: { enabled: false },
