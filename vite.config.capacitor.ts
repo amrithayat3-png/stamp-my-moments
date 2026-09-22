@@ -35,7 +35,12 @@ export default defineConfig({
   // Relative base so index.html references ./assets/* and works from file:// or
   // Capacitor's http://localhost origin.
   base: "./",
-  plugins: [react(), tailwindcss(), tsconfigPaths({ projects: ["./tsconfig.json"] }), emitIndexHtml()],
+  plugins: [
+    react(),
+    tailwindcss(),
+    tsconfigPaths({ projects: ["./tsconfig.json"] }),
+    emitIndexHtml(),
+  ],
   resolve: {
     alias: {
       "@": fileURLToPath(new URL("./src", import.meta.url)),
