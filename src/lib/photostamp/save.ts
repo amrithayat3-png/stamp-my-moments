@@ -32,35 +32,45 @@ async function nativeMedia() {
   }
 }
 
-/**
- * Finds the PhotoStamp album, creating it when missing, and returns its
- * identifier (required on Android by Media.savePhoto).
- */
-async function photoStampAlbumIdentifier(media: any): Promise<string | undefined> {
-  const find = async () => {
-    const existing = await media.getAlbums();
-    const albums: any[] = existing?.albums ?? [];
-    let path: string | undefined;
-    try {
-      path = (await media.getAlbumsPath?.())?.path;
-    } catch {
-      path = undefined;
-    }
-    const matches = albums.filter((a) => a.name === ALBUM_NAME);
-    const preferred = path
-      ? matches.find((a) => String(a.identifier ?? "").startsWith(path))
-      : undefined;
-    return (preferred ?? matches[0])?.identifier as string | undefined;
-  };
+/** Rejects with a readable message if a native call never settles. */
+function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(
+      () => reject(new Error(`${what} timed out — the photo could not be saved`)),
+      ms,
+    );
+    promise.then(
+      (v) => {
+        clearTimeout(timer);
+        resolve(v);
+      },
+      (e) => {
+        clearTimeout(timer);
+        reject(e instanceof Error ? e : new Error(String(e?.message ?? e ?? `${what} failed`)));
+      },
+    );
+  });
+}
 
-  let identifier = await find();
-  if (identifier) return identifier;
+/**
+ * Resolves the PhotoStamp album identifier on Android WITHOUT calling
+ * Media.getAlbums(). getAlbums() asks for READ_MEDIA_IMAGES (full gallery
+ * read access); when that permission isn't granted/declared the plugin parks
+ * the call waiting for a permission result that never arrives, so the
+ * promise never settled and Save spun forever. On Android the album
+ * identifier is simply the folder path "<albumsPath>/PhotoStamp", which
+ * getAlbumsPath() returns without any permission.
+ */
+async function photoStampAlbumIdentifier(media: any): Promise<string> {
+  const res = await withTimeout<any>(media.getAlbumsPath(), 10000, "Finding the album folder");
+  const base = String(res?.path ?? "").replace(/\/+$/, "");
+  if (!base) throw new Error("Could not locate the PhotoStamp album folder");
+  const identifier = `${base}/${ALBUM_NAME}`;
   try {
-    await media.createAlbum({ name: ALBUM_NAME });
+    await withTimeout(media.createAlbum({ name: ALBUM_NAME }), 10000, "Creating the album");
   } catch {
-    // Album may already exist under a different path — fall through to lookup.
+    // Already exists — savePhoto writes into the folder either way.
   }
-  identifier = await find();
   return identifier;
 }
 
@@ -76,11 +86,15 @@ export async function saveStampedFile(file: StampedFile): Promise<void> {
     // Android expects the file name without an extension.
     const fileName = file.name.replace(/\.[^.]+$/, "");
     const albumIdentifier = await photoStampAlbumIdentifier(media);
-    await media.savePhoto({
-      path: `data:image/jpeg;base64,${base64}`,
-      fileName,
-      ...(albumIdentifier ? { albumIdentifier } : {}),
-    });
+    await withTimeout(
+      media.savePhoto({
+        path: `data:image/jpeg;base64,${base64}`,
+        fileName,
+        albumIdentifier,
+      }),
+      30000,
+      "Saving to the gallery",
+    );
     return;
   }
 
