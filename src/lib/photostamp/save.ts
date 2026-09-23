@@ -6,6 +6,9 @@ import type { MediaAlbum, MediaPlugin } from "@capacitor-community/media";
 export const ALBUM_NAME = "PhotoStamp";
 export const ALBUM_PATH = "Pictures/PhotoStamp";
 
+export type NativeSaveStage = "JPEG_FILE_COMPLETE" | "SAVE_HANDOFF_STARTED";
+export type NativeSaveStageReporter = (stage: NativeSaveStage) => void;
+
 interface LegacyPlugin {
   writeFile?: (options: Record<string, unknown>) => Promise<{ uri?: string }>;
   share?: (options: Record<string, unknown>) => Promise<unknown>;
@@ -131,7 +134,11 @@ function uniqueFileName(name: string): string {
   return `${base}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
 }
 
-async function saveNativePhoto(media: MediaPlugin, file: StampedFile): Promise<void> {
+async function saveNativePhoto(
+  media: MediaPlugin,
+  file: StampedFile,
+  reportStage?: NativeSaveStageReporter,
+): Promise<void> {
   const fileName = uniqueFileName(file.name);
   const tempPath = `photostamp/${fileName}.jpg`;
   const base64 = await withTimeout(() => blobToBase64(file.blob), 15000, "Preparing the photo");
@@ -147,6 +154,7 @@ async function saveNativePhoto(media: MediaPlugin, file: StampedFile): Promise<v
     20000,
     "Writing the temporary photo",
   );
+  reportStage?.("JPEG_FILE_COMPLETE");
 
   try {
     const uriResult = await withTimeout(
@@ -157,6 +165,7 @@ async function saveNativePhoto(media: MediaPlugin, file: StampedFile): Promise<v
     if (!uriResult.uri) throw new Error("The temporary photo path was not available");
 
     const albumIdentifier = await photoStampAlbumIdentifier(media);
+    reportStage?.("SAVE_HANDOFF_STARTED");
     await withTimeout(
       () => media.savePhoto({ path: uriResult.uri, fileName, albumIdentifier }),
       30000,
@@ -180,10 +189,13 @@ async function saveNativePhoto(media: MediaPlugin, file: StampedFile): Promise<v
  * Pictures/PhotoStamp. Web: a normal browser download.
  * Source images are never modified or removed.
  */
-export async function saveStampedFile(file: StampedFile): Promise<void> {
+export async function saveStampedFile(
+  file: StampedFile,
+  reportStage?: NativeSaveStageReporter,
+): Promise<void> {
   const media = await nativeMedia();
   if (media) {
-    await saveNativePhoto(media, file);
+    await saveNativePhoto(media, file, reportStage);
     return;
   }
 
