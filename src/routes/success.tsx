@@ -1,19 +1,18 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useEffect, useState } from "react";
-import {
-  AlertTriangle,
-  CheckCircle2,
-  Download,
-  FolderOpen,
-  ImagePlus,
-  Share2,
-} from "lucide-react";
+import { AlertTriangle, CheckCircle2, Download, FolderOpen, ImagePlus, Share2 } from "lucide-react";
 import { toast } from "sonner";
 import { AppShell } from "@/components/photostamp/app-shell";
 import { ProcessingOverlay } from "@/components/photostamp/processing-overlay";
 import { useBatch } from "@/lib/photostamp/batch-store";
 import { useBatchProcessor } from "@/lib/photostamp/use-batch-processor";
-import { ALBUM_PATH, downloadFile, downloadZip, isNativeSave, shareStamped } from "@/lib/photostamp/save";
+import {
+  ALBUM_PATH,
+  downloadFile,
+  downloadZip,
+  isNativeSave,
+  shareStamped,
+} from "@/lib/photostamp/save";
 
 export const Route = createFileRoute("/success")({
   head: () => ({
@@ -21,7 +20,8 @@ export const Route = createFileRoute("/success")({
       { title: "All done — PhotoStamp" },
       {
         name: "description",
-        content: "Your stamped photos are saved as new files in the PhotoStamp album, ready to share.",
+        content:
+          "Your stamped photos are saved as new files in the PhotoStamp album, ready to share.",
       },
       { property: "og:title", content: "All done — PhotoStamp" },
       {
