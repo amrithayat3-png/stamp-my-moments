@@ -6,9 +6,10 @@ interface Props {
   total: number;
   name: string;
   url: string;
+  stage: string;
 }
 
-export function ProcessingOverlay({ open, current, total, name, url }: Props) {
+export function ProcessingOverlay({ open, current, total, name, url, stage }: Props) {
   if (!open) return null;
   const pct = total > 0 ? Math.round((current / total) * 100) : 0;
 
@@ -31,6 +32,9 @@ export function ProcessingOverlay({ open, current, total, name, url }: Props) {
           />
         </div>
         <p className="mt-2 text-xs font-medium text-muted-foreground">{pct}%</p>
+        {stage ? (
+          <p className="mt-2 break-all font-mono text-[10px] text-muted-foreground">{stage}</p>
+        ) : null}
         <p className="mt-4 text-[11px] leading-relaxed text-muted-foreground">
           Your originals stay untouched — stamped copies are saved as new files.
         </p>

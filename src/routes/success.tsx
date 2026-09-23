@@ -96,6 +96,7 @@ function SuccessScreen() {
         total={progress.total || ready.length}
         name={progress.name}
         url={progress.url}
+        stage={progress.stage}
       />
 
       <div className="flex flex-col items-center text-center">

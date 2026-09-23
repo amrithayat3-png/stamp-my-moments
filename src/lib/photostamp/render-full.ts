@@ -7,6 +7,8 @@ export interface StampedFile {
   blob: Blob;
 }
 
+export type RenderStageReporter = (stage: "IMAGE_RENDER_COMPLETE") => void;
+
 function outputName(name: string) {
   const base = name.replace(/\.[^.]+$/, "") || "photo";
   return `${base}_stamped.jpg`;
@@ -53,6 +55,7 @@ const EDGE_STEPS = [4096, 3072, 2048, 1440];
 export async function renderStampedPhoto(
   photo: BatchPhoto,
   settings: StampSettings,
+  reportStage?: RenderStageReporter,
 ): Promise<StampedFile> {
   let lastError: unknown = null;
 
@@ -70,6 +73,7 @@ export async function renderStampedPhoto(
         stampTextFor(photo.captureDate, settings),
         settings,
       );
+      reportStage?.("IMAGE_RENDER_COMPLETE");
       const blob = (await encode(canvas, 0.92)) ?? (await encode(canvas, 0.8));
       if (!blob || blob.size === 0) throw new Error("Not enough memory to save this photo");
       return { name: outputName(photo.name), blob };
