@@ -108,6 +108,7 @@ export function useBatchProcessor() {
         let activeStage: DiagnosticStage = "STAMP_100_REACHED";
         const controller = new AbortController();
         const stage = (nextStage: DiagnosticStage) => {
+          if (controller.signal.aborted) return;
           activeStage = nextStage;
           report(nextStage, photo);
         };
