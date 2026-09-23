@@ -1,12 +1,20 @@
 import { isNativeShell } from "./permissions";
 import type { StampedFile } from "./render-full";
+import { Directory, Filesystem } from "@capacitor/filesystem";
+import type { MediaAlbum, MediaPlugin } from "@capacitor-community/media";
 
 export const ALBUM_NAME = "PhotoStamp";
 export const ALBUM_PATH = "Pictures/PhotoStamp";
 
-function plugins(): Record<string, any> | undefined {
+interface LegacyPlugin {
+  writeFile?: (options: Record<string, unknown>) => Promise<{ uri?: string }>;
+  share?: (options: Record<string, unknown>) => Promise<unknown>;
+}
+
+function plugins(): Record<string, LegacyPlugin> | undefined {
   if (typeof window === "undefined") return undefined;
-  return (window as any).Capacitor?.Plugins;
+  return (window as Window & { Capacitor?: { Plugins?: Record<string, LegacyPlugin> } }).Capacitor
+    ?.Plugins;
 }
 
 function blobToBase64(blob: Blob): Promise<string> {
@@ -33,12 +41,20 @@ async function nativeMedia() {
 }
 
 /** Rejects with a readable message if a native call never settles. */
-function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<T> {
+function withTimeout<T>(operation: () => Promise<T>, ms: number, what: string): Promise<T> {
   return new Promise<T>((resolve, reject) => {
     const timer = setTimeout(
       () => reject(new Error(`${what} timed out — the photo could not be saved`)),
       ms,
     );
+    let promise: Promise<T>;
+    try {
+      promise = operation();
+    } catch (error) {
+      clearTimeout(timer);
+      reject(error instanceof Error ? error : new Error(`${what} failed`));
+      return;
+    }
     promise.then(
       (v) => {
         clearTimeout(timer);
@@ -52,26 +68,111 @@ function withTimeout<T>(promise: Promise<T>, ms: number, what: string): Promise<
   });
 }
 
-/**
- * Resolves the PhotoStamp album identifier on Android WITHOUT calling
- * Media.getAlbums(). getAlbums() asks for READ_MEDIA_IMAGES (full gallery
- * read access); when that permission isn't granted/declared the plugin parks
- * the call waiting for a permission result that never arrives, so the
- * promise never settled and Save spun forever. On Android the album
- * identifier is simply the folder path "<albumsPath>/PhotoStamp", which
- * getAlbumsPath() returns without any permission.
- */
-async function photoStampAlbumIdentifier(media: any): Promise<string> {
-  const res = await withTimeout<any>(media.getAlbumsPath(), 10000, "Finding the album folder");
-  const base = String(res?.path ?? "").replace(/\/+$/, "");
-  if (!base) throw new Error("Could not locate the PhotoStamp album folder");
-  const identifier = `${base}/${ALBUM_NAME}`;
-  try {
-    await withTimeout(media.createAlbum({ name: ALBUM_NAME }), 10000, "Creating the album");
-  } catch {
-    // Already exists — savePhoto writes into the folder either way.
+function normalizePath(value: unknown): string {
+  return String(value ?? "")
+    .replace(/^file:\/\//, "")
+    .replace(/\\/g, "/")
+    .replace(/\/+$/, "");
+}
+
+function matchingAlbum(albums: MediaAlbum[], albumsPath: string) {
+  const base = normalizePath(albumsPath).toLowerCase();
+  return albums.find((album) => {
+    if (String(album?.name ?? "").toLowerCase() !== ALBUM_NAME.toLowerCase()) return false;
+    const identifier = normalizePath(album?.identifier).toLowerCase();
+    return (
+      identifier === `${base}/${ALBUM_NAME.toLowerCase()}` || identifier.startsWith(`${base}/`)
+    );
+  });
+}
+
+function wait(ms: number) {
+  return new Promise<void>((resolve) => setTimeout(resolve, ms));
+}
+
+/** Resolves the verified identifier returned by Media.getAlbums(). */
+async function photoStampAlbumIdentifier(media: MediaPlugin): Promise<string> {
+  const pathResult = await withTimeout(
+    () => media.getAlbumsPath(),
+    10000,
+    "Finding the gallery album folder",
+  );
+  const albumsPath = String(pathResult?.path ?? "");
+  if (!normalizePath(albumsPath)) throw new Error("The gallery album folder was not available");
+
+  const readAlbums = async () => {
+    const result = await withTimeout(() => media.getAlbums(), 10000, "Reading gallery albums");
+    return Array.isArray(result?.albums) ? result.albums : [];
+  };
+
+  let album = matchingAlbum(await readAlbums(), albumsPath);
+  if (!album) {
+    await withTimeout(
+      () => media.createAlbum({ name: ALBUM_NAME }),
+      10000,
+      "Creating the PhotoStamp album",
+    );
+
+    // MediaStore may publish a newly-created album asynchronously. Re-read it
+    // instead of constructing an identifier that the plugin has not verified.
+    for (let attempt = 0; attempt < 4 && !album; attempt += 1) {
+      if (attempt > 0) await wait(500);
+      album = matchingAlbum(await readAlbums(), albumsPath);
+    }
   }
+
+  const identifier = String(album?.identifier ?? "");
+  if (!identifier) throw new Error("The PhotoStamp album could not be verified after creation");
   return identifier;
+}
+
+function uniqueFileName(name: string): string {
+  const base = name.replace(/\.[^.]+$/, "").replace(/[^a-zA-Z0-9_-]+/g, "_") || "photo_stamped";
+  return `${base}_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
+}
+
+async function saveNativePhoto(media: MediaPlugin, file: StampedFile): Promise<void> {
+  const fileName = uniqueFileName(file.name);
+  const tempPath = `photostamp/${fileName}.jpg`;
+  const base64 = await withTimeout(() => blobToBase64(file.blob), 15000, "Preparing the photo");
+
+  await withTimeout(
+    () =>
+      Filesystem.writeFile({
+        path: tempPath,
+        data: base64,
+        directory: Directory.Cache,
+        recursive: true,
+      }),
+    20000,
+    "Writing the temporary photo",
+  );
+
+  try {
+    const uriResult = await withTimeout(
+      () => Filesystem.getUri({ path: tempPath, directory: Directory.Cache }),
+      10000,
+      "Locating the temporary photo",
+    );
+    if (!uriResult.uri) throw new Error("The temporary photo path was not available");
+
+    const albumIdentifier = await photoStampAlbumIdentifier(media);
+    await withTimeout(
+      () => media.savePhoto({ path: uriResult.uri, fileName, albumIdentifier }),
+      30000,
+      "Saving the photo to the gallery",
+    );
+  } finally {
+    try {
+      await withTimeout(
+        () => Filesystem.deleteFile({ path: tempPath, directory: Directory.Cache }),
+        10000,
+        "Cleaning up the temporary photo",
+      );
+    } catch (error) {
+      console.warn("PhotoStamp: could not remove temporary photo", error);
+    }
+  }
 }
 
 /**
@@ -82,27 +183,15 @@ async function photoStampAlbumIdentifier(media: any): Promise<string> {
 export async function saveStampedFile(file: StampedFile): Promise<void> {
   const media = await nativeMedia();
   if (media) {
-    const base64 = await blobToBase64(file.blob);
-    // Android expects the file name without an extension.
-    const fileName = file.name.replace(/\.[^.]+$/, "");
-    const albumIdentifier = await photoStampAlbumIdentifier(media);
-    await withTimeout(
-      media.savePhoto({
-        path: `data:image/jpeg;base64,${base64}`,
-        fileName,
-        albumIdentifier,
-      }),
-      30000,
-      "Saving to the gallery",
-    );
+    await saveNativePhoto(media, file);
     return;
   }
 
   const p = plugins();
-  if (isNativeShell() && p?.['Filesystem']?.writeFile) {
+  if (isNativeShell() && p?.["Filesystem"]?.writeFile) {
     // Fallback: scoped-storage compliant write into the public Pictures dir.
     const base64 = await blobToBase64(file.blob);
-    await p['Filesystem'].writeFile({
+    await p["Filesystem"].writeFile({
       path: `${ALBUM_PATH}/${file.name}`,
       data: base64,
       directory: "EXTERNAL_STORAGE",
@@ -139,17 +228,17 @@ export async function downloadZip(files: StampedFile[]) {
 /** Shares the stamped photos through the native or Web Share sheet. */
 export async function shareStamped(files: StampedFile[]): Promise<"shared" | "unsupported"> {
   const p = plugins();
-  if (isNativeShell() && p?.['Share']?.share && p?.['Filesystem']?.writeFile) {
+  if (isNativeShell() && p?.["Share"]?.share && p?.["Filesystem"]?.writeFile) {
     const first = files[0];
     if (!first) return "unsupported";
     const base64 = await blobToBase64(first.blob);
-    const written = await p['Filesystem'].writeFile({
+    const written = await p["Filesystem"].writeFile({
       path: `${ALBUM_PATH}/${first.name}`,
       data: base64,
       directory: "EXTERNAL_STORAGE",
       recursive: true,
     });
-    await p['Share'].share({ title: "Stamped with PhotoStamp", url: written?.uri ?? undefined });
+    await p["Share"].share({ title: "Stamped with PhotoStamp", url: written?.uri ?? undefined });
     return "shared";
   }
 
