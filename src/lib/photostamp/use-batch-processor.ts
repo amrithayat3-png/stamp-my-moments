@@ -17,14 +17,43 @@ interface Progress {
   url: string;
 }
 
-/** Yields to the browser so the progress UI stays responsive between photos. */
+const RENDER_TIMEOUT_MS = 60000;
+const SAVE_TIMEOUT_MS = 90000;
+
+/** Yields briefly without depending on requestAnimationFrame firing in Android WebView. */
 function yieldToBrowser() {
   return new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = () => {
+      if (settled) return;
+      settled = true;
+      resolve();
+    };
+
+    // This independent fallback is essential: a WebView may suspend animation
+    // frames during a route transition even while timers continue to run.
+    setTimeout(finish, 100);
     if (typeof requestAnimationFrame === "function") {
-      requestAnimationFrame(() => setTimeout(resolve, 0));
+      requestAnimationFrame(() => setTimeout(finish, 0));
     } else {
-      setTimeout(resolve, 0);
+      setTimeout(finish, 0);
     }
+  });
+}
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
   });
 }
 
@@ -47,16 +76,29 @@ export function useBatchProcessor() {
       const failed: SkippedPhoto[] = [];
 
       for (let i = 0; i < photos.length; i += 1) {
-        const photo = photos[i]!;
+        const photo = photos[i];
+        if (!photo) continue;
         setProgress({ current: i + 1, total: photos.length, name: photo.name, url: photo.url });
         // One photo per frame keeps memory flat and the UI interactive.
         await yieldToBrowser();
         try {
-          const file = await renderStampedPhoto(photo, settingsFor(photo));
-          await saveStampedFile(file);
+          console.info("PhotoStamp: STAMP_START", photo.name);
+          const file = await withTimeout(
+            renderStampedPhoto(photo, settingsFor(photo)),
+            RENDER_TIMEOUT_MS,
+            "Stamping timed out while creating the final JPEG",
+          );
+          console.info("PhotoStamp: JPEG_BLOB_COMPLETE", photo.name, file.blob.size);
+          console.info("PhotoStamp: ANDROID_SAVE_START", photo.name);
+          await withTimeout(
+            saveStampedFile(file),
+            SAVE_TIMEOUT_MS,
+            "Saving timed out before the gallery operation completed",
+          );
+          console.info("PhotoStamp: ANDROID_SAVE_COMPLETE", photo.name);
           done.push(file);
         } catch (error) {
-          console.error("PhotoStamp: skipped a photo", photo.name, error);
+          console.error("PhotoStamp: STAMP_ERROR", photo.name, error);
           failed.push({
             name: photo.name,
             reason: error instanceof Error ? error.message : "Unknown error",
