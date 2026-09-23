@@ -12,12 +12,32 @@ function outputName(name: string) {
   return `${base}_stamped.jpg`;
 }
 
+const JPEG_ENCODE_TIMEOUT_MS = 20000;
+
 function encode(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null> {
-  return new Promise((resolve) => {
+  return new Promise((resolve, reject) => {
+    let settled = false;
+    const timer = setTimeout(() => {
+      if (settled) return;
+      settled = true;
+      reject(new Error("Creating the final JPEG timed out"));
+    }, JPEG_ENCODE_TIMEOUT_MS);
+
     try {
-      canvas.toBlob((b) => resolve(b), "image/jpeg", quality);
-    } catch {
-      resolve(null);
+      canvas.toBlob(
+        (blob) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(blob);
+        },
+        "image/jpeg",
+        quality,
+      );
+    } catch (error) {
+      settled = true;
+      clearTimeout(timer);
+      reject(error instanceof Error ? error : new Error("Creating the final JPEG failed"));
     }
   });
 }
