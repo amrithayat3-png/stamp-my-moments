@@ -6,6 +6,25 @@ export interface DecodedImage {
   height: number;
 }
 
+const SOURCE_TIMEOUT_MS = 20000;
+const DECODE_TIMEOUT_MS = 30000;
+
+function withTimeout<T>(promise: Promise<T>, ms: number, message: string): Promise<T> {
+  return new Promise<T>((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error(message)), ms);
+    promise.then(
+      (value) => {
+        clearTimeout(timer);
+        resolve(value);
+      },
+      (error) => {
+        clearTimeout(timer);
+        reject(error);
+      },
+    );
+  });
+}
+
 function looksHeic(blob: Blob | null, url: string) {
   const type = blob?.type ?? "";
   return /hei[cf]/i.test(type) || /\.hei[cf](\?|$)/i.test(url);
@@ -15,7 +34,11 @@ function looksHeic(blob: Blob | null, url: string) {
 async function heicToBitmapSource(blob: Blob): Promise<Blob | null> {
   try {
     const { heicTo } = await import("heic-to");
-    return await heicTo({ blob, type: "image/jpeg", quality: 0.95 });
+    return await withTimeout(
+      heicTo({ blob, type: "image/jpeg", quality: 0.95 }),
+      DECODE_TIMEOUT_MS,
+      "Converting this HEIC photo timed out",
+    );
   } catch {
     return null;
   }
@@ -23,12 +46,16 @@ async function heicToBitmapSource(blob: Blob): Promise<Blob | null> {
 
 async function sourceBlob(photo: Pick<BatchPhoto, "url" | "file">): Promise<Blob | null> {
   if (photo.file) return photo.file;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), SOURCE_TIMEOUT_MS);
   try {
-    const res = await fetch(photo.url);
+    const res = await fetch(photo.url, { signal: controller.signal });
     if (!res.ok) return null;
     return await res.blob();
   } catch {
     return null;
+  } finally {
+    clearTimeout(timer);
   }
 }
 
@@ -36,7 +63,11 @@ async function sourceBlob(photo: Pick<BatchPhoto, "url" | "file">): Promise<Blob
 async function readOrientation(blob: Blob): Promise<number> {
   try {
     const exifr = await import("exifr");
-    const data = await exifr.parse(blob, { pick: ["Orientation"], translateValues: false });
+    const data = await withTimeout(
+      exifr.parse(blob, { pick: ["Orientation"], translateValues: false }),
+      SOURCE_TIMEOUT_MS,
+      "Reading photo orientation timed out",
+    );
     const value = Number((data as any)?.Orientation);
     return Number.isFinite(value) && value >= 1 && value <= 8 ? value : 1;
   } catch {
@@ -53,10 +84,21 @@ async function readOrientation(blob: Blob): Promise<number> {
 function decodeElement(url: string): Promise<HTMLImageElement> {
   return new Promise((resolve, reject) => {
     const img = new Image();
+    const timer = setTimeout(() => {
+      img.onload = null;
+      img.onerror = null;
+      img.src = "";
+      reject(new Error("Opening this photo timed out"));
+    }, DECODE_TIMEOUT_MS);
     img.decoding = "sync";
-    img.onload = () => resolve(img);
-    img.onerror = () =>
+    img.onload = () => {
+      clearTimeout(timer);
+      resolve(img);
+    };
+    img.onerror = () => {
+      clearTimeout(timer);
       reject(new Error("This photo's format isn't supported by the browser (try JPEG or PNG)"));
+    };
     img.src = url;
   });
 }
@@ -130,7 +172,11 @@ export async function decodeToCanvas(
 
   if (blob && typeof createImageBitmap === "function") {
     try {
-      const bitmap = await createImageBitmap(blob, { imageOrientation: "from-image" });
+      const bitmap = await withTimeout(
+        createImageBitmap(blob, { imageOrientation: "from-image" }),
+        DECODE_TIMEOUT_MS,
+        "Opening this photo timed out",
+      );
       const scale = Math.min(1, maxEdge / Math.max(bitmap.width, bitmap.height));
       const width = Math.max(1, Math.round(bitmap.width * scale));
       const height = Math.max(1, Math.round(bitmap.height * scale));
