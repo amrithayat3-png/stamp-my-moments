@@ -21,38 +21,47 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-let albumReady = false;
-
-/**
- * Ensures the dedicated PhotoStamp album exists (native only).
- * Safe to call repeatedly; a duplicate album error is ignored.
- */
-async function ensureAlbum() {
-  if (albumReady) return;
-  const media = plugins()?.['Media'];
-  if (!media?.createAlbum) {
-    albumReady = true;
-    return;
-  }
+/** Loads the native Media plugin only inside the Capacitor shell. */
+async function nativeMedia() {
+  if (!isNativeShell()) return undefined;
   try {
-    const existing = await media.getAlbums?.();
-    const found = (existing?.albums ?? []).some((a: any) => a.name === ALBUM_NAME);
-    if (!found) await media.createAlbum({ name: ALBUM_NAME });
-  } catch {
-    // Album may already exist, or the plugin refuses duplicates — keep going.
-  }
-  albumReady = true;
-}
-
-async function albumIdentifier(): Promise<string | undefined> {
-  const media = plugins()?.['Media'];
-  try {
-    const existing = await media?.getAlbums?.();
-    const match = (existing?.albums ?? []).find((a: any) => a.name === ALBUM_NAME);
-    return match?.identifier;
+    const mod = await import("@capacitor-community/media");
+    return mod.Media;
   } catch {
     return undefined;
   }
+}
+
+/**
+ * Finds the PhotoStamp album, creating it when missing, and returns its
+ * identifier (required on Android by Media.savePhoto).
+ */
+async function photoStampAlbumIdentifier(media: any): Promise<string | undefined> {
+  const find = async () => {
+    const existing = await media.getAlbums();
+    const albums: any[] = existing?.albums ?? [];
+    let path: string | undefined;
+    try {
+      path = (await media.getAlbumsPath?.())?.path;
+    } catch {
+      path = undefined;
+    }
+    const matches = albums.filter((a) => a.name === ALBUM_NAME);
+    const preferred = path
+      ? matches.find((a) => String(a.identifier ?? "").startsWith(path))
+      : undefined;
+    return (preferred ?? matches[0])?.identifier as string | undefined;
+  };
+
+  let identifier = await find();
+  if (identifier) return identifier;
+  try {
+    await media.createAlbum({ name: ALBUM_NAME });
+  } catch {
+    // Album may already exist under a different path — fall through to lookup.
+  }
+  identifier = await find();
+  return identifier;
 }
 
 /**
@@ -61,19 +70,21 @@ async function albumIdentifier(): Promise<string | undefined> {
  * Source images are never modified or removed.
  */
 export async function saveStampedFile(file: StampedFile): Promise<void> {
-  const p = plugins();
-  if (isNativeShell() && p?.['Media']?.savePhoto) {
-    await ensureAlbum();
+  const media = await nativeMedia();
+  if (media) {
     const base64 = await blobToBase64(file.blob);
-    await p['Media'].savePhoto({
+    // Android expects the file name without an extension.
+    const fileName = file.name.replace(/\.[^.]+$/, "");
+    const albumIdentifier = await photoStampAlbumIdentifier(media);
+    await media.savePhoto({
       path: `data:image/jpeg;base64,${base64}`,
-      album: ALBUM_NAME,
-      albumIdentifier: await albumIdentifier(),
-      fileName: file.name,
+      fileName,
+      ...(albumIdentifier ? { albumIdentifier } : {}),
     });
     return;
   }
 
+  const p = plugins();
   if (isNativeShell() && p?.['Filesystem']?.writeFile) {
     // Fallback: scoped-storage compliant write into the public Pictures dir.
     const base64 = await blobToBase64(file.blob);
