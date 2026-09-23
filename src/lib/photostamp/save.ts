@@ -1,12 +1,18 @@
 import { isNativeShell } from "./permissions";
 import type { StampedFile } from "./render-full";
 import { Directory, Filesystem } from "@capacitor/filesystem";
-import type { MediaAlbum, MediaPlugin } from "@capacitor-community/media";
+import { Media, type MediaAlbum, type MediaPlugin } from "@capacitor-community/media";
 
 export const ALBUM_NAME = "PhotoStamp";
 export const ALBUM_PATH = "Pictures/PhotoStamp";
 
-export type NativeSaveStage = "JPEG_FILE_COMPLETE" | "SAVE_HANDOFF_STARTED";
+export type NativeSaveStage =
+  | "BASE64_CONVERSION_START"
+  | "BASE64_CONVERSION_COMPLETE"
+  | "TEMP_FILE_WRITE_START"
+  | "TEMP_FILE_WRITE_COMPLETE"
+  | "JPEG_FILE_COMPLETE"
+  | "SAVE_HANDOFF_STARTED";
 export type NativeSaveStageReporter = (stage: NativeSaveStage) => void;
 
 interface LegacyPlugin {
@@ -32,15 +38,9 @@ function blobToBase64(blob: Blob): Promise<string> {
   });
 }
 
-/** Loads the native Media plugin only inside the Capacitor shell. */
-async function nativeMedia() {
-  if (!isNativeShell()) return undefined;
-  try {
-    const mod = await import("@capacitor-community/media");
-    return mod.Media;
-  } catch {
-    return undefined;
-  }
+/** Returns the bundled native plugin proxy only inside the Capacitor shell. */
+function nativeMedia() {
+  return isNativeShell() ? Media : undefined;
 }
 
 /** Rejects with a readable message if a native call never settles. */
@@ -141,8 +141,11 @@ async function saveNativePhoto(
 ): Promise<void> {
   const fileName = uniqueFileName(file.name);
   const tempPath = `photostamp/${fileName}.jpg`;
+  reportStage?.("BASE64_CONVERSION_START");
   const base64 = await withTimeout(() => blobToBase64(file.blob), 15000, "Preparing the photo");
+  reportStage?.("BASE64_CONVERSION_COMPLETE");
 
+  reportStage?.("TEMP_FILE_WRITE_START");
   await withTimeout(
     () =>
       Filesystem.writeFile({
@@ -154,6 +157,7 @@ async function saveNativePhoto(
     20000,
     "Writing the temporary photo",
   );
+  reportStage?.("TEMP_FILE_WRITE_COMPLETE");
   reportStage?.("JPEG_FILE_COMPLETE");
 
   try {
@@ -193,7 +197,7 @@ export async function saveStampedFile(
   file: StampedFile,
   reportStage?: NativeSaveStageReporter,
 ): Promise<void> {
-  const media = await nativeMedia();
+  const media = nativeMedia();
   if (media) {
     await saveNativePhoto(media, file, reportStage);
     return;
