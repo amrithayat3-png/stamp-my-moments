@@ -75,10 +75,11 @@ export async function saveStampedFile(file: StampedFile): Promise<void> {
     const base64 = await blobToBase64(file.blob);
     // Android expects the file name without an extension.
     const fileName = file.name.replace(/\.[^.]+$/, "");
+    const albumIdentifier = await photoStampAlbumIdentifier(media);
     await media.savePhoto({
       path: `data:image/jpeg;base64,${base64}`,
-      albumIdentifier: await photoStampAlbumIdentifier(media),
       fileName,
+      ...(albumIdentifier ? { albumIdentifier } : {}),
     });
     return;
   }
