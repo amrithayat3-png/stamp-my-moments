@@ -24,12 +24,16 @@ function encode(canvas: HTMLCanvasElement, quality: number): Promise<Blob | null
     }, JPEG_ENCODE_TIMEOUT_MS);
 
     try {
-      canvas.toBlob((blob) => {
-        if (settled) return;
-        settled = true;
-        clearTimeout(timer);
-        resolve(blob);
-      }, "image/jpeg", quality);
+      canvas.toBlob(
+        (blob) => {
+          if (settled) return;
+          settled = true;
+          clearTimeout(timer);
+          resolve(blob);
+        },
+        "image/jpeg",
+        quality,
+      );
     } catch (error) {
       settled = true;
       clearTimeout(timer);
