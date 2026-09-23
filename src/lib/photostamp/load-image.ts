@@ -68,7 +68,7 @@ async function readOrientation(blob: Blob): Promise<number> {
       SOURCE_TIMEOUT_MS,
       "Reading photo orientation timed out",
     );
-    const value = Number((data as any)?.Orientation);
+    const value = Number((data as { Orientation?: unknown } | null)?.Orientation);
     return Number.isFinite(value) && value >= 1 && value <= 8 ? value : 1;
   } catch {
     return 1;
